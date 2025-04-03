@@ -1,5 +1,6 @@
 ﻿using Agora.Rtc;
 using io.agora.rtc.demo;
+using Meta.XR.ImmersiveDebugger.UserInterface.Generic;
 using PassthroughCameraSamples;
 using System;
 using System.Collections;
@@ -430,7 +431,8 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             videoSurface.OnTextureSizeModify += (width, height) =>
             {
                 var transform = videoSurface.GetComponent<RectTransform>();
-                if (transform) transform.sizeDelta = new Vector2(width / 2, height / 2);
+               // if (transform) transform.sizeDelta = new Vector2(width / 2, height / 2);
+                if (transform) transform.sizeDelta = new Vector2(640,360);//Added temporarily code
                 Debug.Log($"OnTextureSizeModify: {width}x{height}");
             };
             videoSurface.SetEnable(true);
@@ -445,8 +447,10 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             var canvas = GameObject.Find("VideoCanvas");
             if (canvas != null) go.transform.parent = canvas.transform;
             go.transform.Rotate(0f, 0f, 0f);
-            go.transform.localPosition = Vector3.zero;
+           
+            go.transform.localPosition = new Vector3(400,0,0);
             go.transform.localScale = new Vector3(1, 1, 1f);
+            go.GetComponent<RectTransform>().sizeDelta = new Vector2(640, 360);
             return go.AddComponent<VideoSurface>();
         }
 
@@ -474,7 +478,8 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             if (parent.GetComponentInChildren<RemoteVideoCallQualityPanel>() != null) return;
             var panel = Instantiate(_videoQualityItemPrefab, parent.transform);
             panel.transform.localPosition = new Vector3(0, -182, 0);
-            panel.transform.rotation = Quaternion.Euler(0, 0, 0);
+            panel.transform.Rotate(0f, 0f, 0f);
+           // panel.GetComponent<RectTransform>().sizeDelta = new Vector2(640, 360);
             var comp = panel.AddComponent<RemoteVideoCallQualityPanel>();
             comp.Uid = uid;
         }
