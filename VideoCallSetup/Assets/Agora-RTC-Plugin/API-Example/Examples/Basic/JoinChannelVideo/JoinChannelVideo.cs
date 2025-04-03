@@ -1,6 +1,5 @@
 ﻿using Agora.Rtc;
 using io.agora.rtc.demo;
-using Meta.XR.ImmersiveDebugger.UserInterface.Generic;
 using PassthroughCameraSamples;
 using System;
 using System.Collections;
@@ -431,8 +430,8 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             videoSurface.OnTextureSizeModify += (width, height) =>
             {
                 var transform = videoSurface.GetComponent<RectTransform>();
-               // if (transform) transform.sizeDelta = new Vector2(width / 2, height / 2);
-                if (transform) transform.sizeDelta = new Vector2(640,360);//Added temporarily code
+              //  if (transform) transform.sizeDelta = new Vector2(width / 2, height / 2);
+                if (transform) transform.sizeDelta = new Vector2(640,360);
                 Debug.Log($"OnTextureSizeModify: {width}x{height}");
             };
             videoSurface.SetEnable(true);
