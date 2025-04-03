@@ -287,8 +287,8 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
         {
             int ret = RtcEngine.JoinChannel(_token, _channelName, "", 0);
             Log.UpdateLog($"JoinChannel result: {ret}");
-            var node = MakeVideoView(0);
-            CreateLocalVideoCallQualityPanel(node);
+           // var node = MakeVideoView(0);
+           // CreateLocalVideoCallQualityPanel(node);
         }
 
         public void LeaveChannel()
@@ -444,9 +444,9 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             go.AddComponent<UIElementDrag>();
             var canvas = GameObject.Find("VideoCanvas");
             if (canvas != null) go.transform.parent = canvas.transform;
-            go.transform.Rotate(0f, 0f, 180f);
+            go.transform.Rotate(0f, 0f, 0f);
             go.transform.localPosition = Vector3.zero;
-            go.transform.localScale = new Vector3(2f, 3f, 1f);
+            go.transform.localScale = new Vector3(1, 1, 1f);
             return go.AddComponent<VideoSurface>();
         }
 
@@ -473,6 +473,8 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
         {
             if (parent.GetComponentInChildren<RemoteVideoCallQualityPanel>() != null) return;
             var panel = Instantiate(_videoQualityItemPrefab, parent.transform);
+            panel.transform.localPosition = new Vector3(0, -182, 0);
+            panel.transform.rotation = Quaternion.Euler(0, 0, 0);
             var comp = panel.AddComponent<RemoteVideoCallQualityPanel>();
             comp.Uid = uid;
         }
