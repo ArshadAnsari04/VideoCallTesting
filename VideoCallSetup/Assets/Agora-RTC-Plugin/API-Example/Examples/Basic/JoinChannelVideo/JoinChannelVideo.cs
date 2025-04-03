@@ -43,10 +43,14 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
         public Dropdown _areaSelect;
         public GameObject _videoQualityItemPrefab;
 
-        // Passthrough Camera fields
+        // Passthrough Camera fields for Quest 3
         [SerializeField] private WebCamTextureManager m_webCamTextureManager;
         [SerializeField] private Text m_debugText;
         [SerializeField] private RawImage m_image;
+
+        // Platform-specific video source
+        private WebCamTexture _videoTexture;
+        private Texture2D _textureBuffer;
 
         // Use this for initialization
         private void Start()
@@ -60,29 +64,93 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
 
 #if UNITY_IOS || UNITY_ANDROID
             var text = GameObject.Find("VideoCanvas/Scroll View/Viewport/Content/VideoDeviceManager").GetComponent<Text>();
-            text.text = "Video device manager not support in this platform";
-
+            text.text = "Video device manager not supported on this platform";
             GameObject.Find("VideoCanvas/Scroll View/Viewport/Content/VideoDeviceButton").SetActive(false);
             GameObject.Find("VideoCanvas/Scroll View/Viewport/Content/deviceIdSelect").SetActive(false);
             GameObject.Find("VideoCanvas/Scroll View/Viewport/Content/VideoSelectButton").SetActive(false);
 #endif
+            InitEngine();
+            Invoke("JoinChannel", 4);
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-            StartCoroutine(InitializeWebCamTexture());
+            StartCoroutine(InitializeQuestPassthrough());
+#elif UNITY_STANDALONE_WIN || UNITY_EDITOR
+            StartCoroutine(InitializeWindowsWebcam());
 #endif
         }
 
-        private IEnumerator InitializeWebCamTexture()
+        // Initialize Quest 3 Passthrough Camera
+        private IEnumerator InitializeQuestPassthrough()
         {
 #if UNITY_ANDROID && !UNITY_EDITOR
             while (m_webCamTextureManager.WebCamTexture == null)
             {
                 yield return null;
             }
+            _videoTexture = m_webCamTextureManager.WebCamTexture;
+            _textureBuffer = new Texture2D(_videoTexture.width, _videoTexture.height, TextureFormat.RGBA32, false);
             m_debugText.text += "\nWebCamTexture Object ready and playing.";
-            m_image.texture = m_webCamTextureManager.WebCamTexture;
+            m_image.texture = _videoTexture;
+            StartCoroutine(StreamVideoToAgora());
 #endif
             yield break;
+        }
+
+        // Initialize Windows Webcam
+        private IEnumerator InitializeWindowsWebcam()
+        {
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR
+            WebCamDevice[] devices = WebCamTexture.devices;
+            if (devices.Length > 0)
+            {
+                _videoTexture = new WebCamTexture(devices[0].name);
+                _videoTexture.Play();
+                while (!_videoTexture.isPlaying)
+                {
+                    yield return null;
+                }
+                _textureBuffer = new Texture2D(_videoTexture.width, _videoTexture.height, TextureFormat.RGBA32, false);
+                m_debugText.text += "\nWindows Webcam initialized.";
+                m_image.texture = _videoTexture;
+                StartCoroutine(StreamVideoToAgora());
+            }
+            else
+            {
+                m_debugText.text += "\nNo webcam found on Windows.";
+            }
+#endif
+            yield break;
+        }
+
+        // Stream video to Agora
+        private IEnumerator StreamVideoToAgora()
+        {
+            while (true)
+            {
+                if (_videoTexture != null && _videoTexture.isPlaying)
+                {
+                    _textureBuffer.SetPixels(_videoTexture.GetPixels());
+                    _textureBuffer.Apply();
+
+                    byte[] videoData = _textureBuffer.GetRawTextureData();
+                    ExternalVideoFrame frame = new ExternalVideoFrame
+                    {
+                        type = VIDEO_BUFFER_TYPE.VIDEO_BUFFER_RAW_DATA,
+                        format = VIDEO_PIXEL_FORMAT.VIDEO_PIXEL_RGBA,
+                        buffer = videoData,
+                        stride = _videoTexture.width,
+                        height = _videoTexture.height,
+                        timestamp = (long)(Time.time * 1000)
+                    };
+
+                    int ret = RtcEngine.PushVideoFrame(frame);
+                    if (ret != 0)
+                    {
+                        Log.UpdateLog("PushVideoFrame failed: " + ret);
+                    }
+                }
+                yield return new WaitForEndOfFrame();
+            }
         }
 
         // Update is called once per frame
@@ -91,11 +159,9 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             PermissionHelper.RequestMicrophontPermission();
             PermissionHelper.RequestCameraPermission();
 #if UNITY_ANDROID && !UNITY_EDITOR
-#if OCULUS_QUEST
             m_debugText.text = PassthroughCameraPermissions.HasCameraPermission == true ? "Permission granted." : "No permission granted.";
-#else
-            m_debugText.text = "Running on Android device.";
-#endif
+#elif UNITY_STANDALONE_WIN || UNITY_EDITOR
+            m_debugText.text = "Running on Windows platform.";
 #endif
         }
 
@@ -135,32 +201,34 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
 
         #region -- Button Events ---
 
-        public void InitEngine()
+            public void InitEngine()
         {
             var text = this._areaSelect.captionText.text;
             AREA_CODE areaCode = (AREA_CODE)Enum.Parse(typeof(AREA_CODE), text);
             this.Log.UpdateLog("Select AREA_CODE : " + areaCode);
 
             UserEventHandler handler = new UserEventHandler(this);
-            RtcEngineContext context = new RtcEngineContext();
-            context.appId = _appID;
-            context.channelProfile = CHANNEL_PROFILE_TYPE.CHANNEL_PROFILE_LIVE_BROADCASTING;
-            context.audioScenario = AUDIO_SCENARIO_TYPE.AUDIO_SCENARIO_DEFAULT;
-            context.areaCode = areaCode;
+            RtcEngineContext context = new RtcEngineContext
+            {
+                appId = _appID,
+                channelProfile = CHANNEL_PROFILE_TYPE.CHANNEL_PROFILE_LIVE_BROADCASTING,
+                audioScenario = AUDIO_SCENARIO_TYPE.AUDIO_SCENARIO_DEFAULT,
+                areaCode = areaCode
+            };
             var result = RtcEngine.Initialize(context);
             this.Log.UpdateLog("Initialize result : " + result);
 
             RtcEngine.InitEventHandler(handler);
-
             RtcEngine.EnableAudio();
             RtcEngine.EnableVideo();
-            VideoEncoderConfiguration config = new VideoEncoderConfiguration();
-            config.dimensions = new VideoDimensions(640, 360);
-            config.frameRate = 15;
-            config.bitrate = 0;
-            RtcEngine.SetVideoEncoderConfiguration(config);
             RtcEngine.SetChannelProfile(CHANNEL_PROFILE_TYPE.CHANNEL_PROFILE_COMMUNICATION);
             RtcEngine.SetClientRole(CLIENT_ROLE_TYPE.CLIENT_ROLE_BROADCASTER);
+
+            // Fix: Use Optional<bool> for ChannelMediaOptions
+            var options = new ChannelMediaOptions();
+            options.publishCameraTrack.SetValue(false);      // Disable default camera
+            options.publishCustomVideoTrack.SetValue(true);  // Enable custom video feed
+            RtcEngine.UpdateChannelMediaOptions(options);
         }
 
         public void JoinChannel()
@@ -192,7 +260,7 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
         {
             var options = new ChannelMediaOptions();
             options.publishMicrophoneTrack.SetValue(true);
-            options.publishCameraTrack.SetValue(true);
+            options.publishCustomVideoTrack.SetValue(true);  // Use custom video track
             var nRet = RtcEngine.UpdateChannelMediaOptions(options);
             this.Log.UpdateLog("UpdateChannelMediaOptions: " + nRet);
         }
@@ -201,34 +269,37 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
         {
             var options = new ChannelMediaOptions();
             options.publishMicrophoneTrack.SetValue(false);
-            options.publishCameraTrack.SetValue(false);
+            options.publishCustomVideoTrack.SetValue(false);  // Stop custom video track
             var nRet = RtcEngine.UpdateChannelMediaOptions(options);
             this.Log.UpdateLog("UpdateChannelMediaOptions: " + nRet);
         }
 
         public void AdjustVideoEncodedConfiguration640()
         {
-            VideoEncoderConfiguration config = new VideoEncoderConfiguration();
-            config.dimensions = new VideoDimensions(640, 360);
-            config.frameRate = 15;
-            config.bitrate = 0;
+            VideoEncoderConfiguration config = new VideoEncoderConfiguration
+            {
+                dimensions = new VideoDimensions(640, 360),
+                frameRate = 15,
+                bitrate = 0
+            };
             RtcEngine.SetVideoEncoderConfiguration(config);
         }
 
         public void AdjustVideoEncodedConfiguration480()
         {
-            VideoEncoderConfiguration config = new VideoEncoderConfiguration();
-            config.dimensions = new VideoDimensions(480, 480);
-            config.frameRate = 15;
-            config.bitrate = 0;
+            VideoEncoderConfiguration config = new VideoEncoderConfiguration
+            {
+                dimensions = new VideoDimensions(480, 480),
+                frameRate = 15,
+                bitrate = 0
+            };
             RtcEngine.SetVideoEncoderConfiguration(config);
         }
 
         public void GetVideoDeviceManager()
         {
-#if !UNITY_IOS && !UNITY_ANDROID
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR
             _videoDeviceSelect.ClearOptions();
-
             _videoDeviceManager = RtcEngine.GetVideoDeviceManager();
             _videoDeviceInfos = _videoDeviceManager.EnumerateVideoDevices();
             Log.UpdateLog(string.Format("VideoDeviceManager count: {0}", _videoDeviceInfos.Length));
@@ -237,17 +308,14 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
                 Log.UpdateLog(string.Format("VideoDeviceManager device index: {0}, name: {1}, id: {2}", i,
                     _videoDeviceInfos[i].deviceName, _videoDeviceInfos[i].deviceId));
             }
-
             _videoDeviceSelect.AddOptions(_videoDeviceInfos.Select(w =>
-                    new Dropdown.OptionData(
-                        string.Format("{0} :{1}", w.deviceName, w.deviceId)))
-                .ToList());
+                    new Dropdown.OptionData(string.Format("{0} :{1}", w.deviceName, w.deviceId))).ToList());
 #endif
         }
 
         public void SelectVideoCaptureDevice()
         {
-#if !UNITY_IOS && !UNITY_ANDROID
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR
             if (_videoDeviceSelect == null) return;
             var option = _videoDeviceSelect.options[_videoDeviceSelect.value].text;
             if (string.IsNullOrEmpty(option)) return;
@@ -255,6 +323,17 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             var deviceId = option.Split(":".ToCharArray(), StringSplitOptions.RemoveEmptyEntries)[1];
             var ret = _videoDeviceManager.SetDevice(deviceId);
             Log.UpdateLog("SelectVideoCaptureDevice ret:" + ret + " , DeviceId: " + deviceId);
+
+            // Restart webcam with new device
+            if (_videoTexture != null)
+            {
+                _videoTexture.Stop();
+                Destroy(_textureBuffer);
+            }
+            _videoTexture = new WebCamTexture(deviceId);
+            _videoTexture.Play();
+            _textureBuffer = new Texture2D(_videoTexture.width, _videoTexture.height, TextureFormat.RGBA32, false);
+            m_image.texture = _videoTexture;
 #endif
         }
 
@@ -263,10 +342,16 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
         private void OnDestroy()
         {
             Debug.Log("OnDestroy");
-            if (RtcEngine == null) return;
-            RtcEngine.InitEventHandler(null);
-            RtcEngine.LeaveChannel();
-            RtcEngine.Dispose();
+            if (RtcEngine != null)
+            {
+                RtcEngine.InitEventHandler(null);
+                RtcEngine.LeaveChannel();
+                RtcEngine.Dispose();
+            }
+            if (_videoTexture != null)
+            {
+                _videoTexture.Stop();
+            }
         }
 
         internal string GetChannelName()
@@ -284,10 +369,9 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
                 return go; // reuse
             }
 
-            // create a GameObject and assign to this new user
             var videoSurface = MakeImageSurface(uid.ToString());
             if (ReferenceEquals(videoSurface, null)) return null;
-            // configure videoSurface
+
             if (uid == 0)
             {
                 videoSurface.SetForUser(uid, channelId);
@@ -302,15 +386,8 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
                 var transform = videoSurface.GetComponent<RectTransform>();
                 if (transform)
                 {
-                    //If render in RawImage. just set rawImage size.
                     transform.sizeDelta = new Vector2(width / 2, height / 2);
                     transform.localScale = Vector3.one;
-                }
-                else
-                {
-                    //If render in MeshRenderer, just set localSize with MeshRenderer
-                    float scale = (float)height / (float)width;
-                    videoSurface.transform.localScale = new Vector3(-1, 1, scale);
                 }
                 Debug.Log("OnTextureSizeModify: " + width + "  " + height);
             };
@@ -319,65 +396,24 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             return videoSurface.gameObject;
         }
 
-        // VIDEO TYPE 1: 3D Object
-        private static VideoSurface MakePlaneSurface(string goName)
-        {
-            var go = GameObject.CreatePrimitive(PrimitiveType.Plane);
-
-            if (go == null)
-            {
-                return null;
-            }
-
-            go.name = goName;
-            var mesh = go.GetComponent<MeshRenderer>();
-            if (mesh != null)
-            {
-                Debug.LogWarning("VideoSureface update shader");
-                mesh.material = new Material(Shader.Find("Unlit/Texture"));
-            }
-            // set up transform
-            go.transform.Rotate(-90.0f, 0.0f, 0.0f);
-            go.transform.position = Vector3.zero;
-            go.transform.localScale = new Vector3(0.25f, 0.5f, 0.5f);
-
-            // configure videoSurface
-            var videoSurface = go.AddComponent<VideoSurface>();
-            return videoSurface;
-        }
-
-        // Video TYPE 2: RawImage
         private static VideoSurface MakeImageSurface(string goName)
         {
             GameObject go = new GameObject();
-
-            if (go == null)
-            {
-                return null;
-            }
+            if (go == null) return null;
 
             go.name = goName;
-            // to be renderered onto
             go.AddComponent<RawImage>();
-            // make the object draggable
             go.AddComponent<UIElementDrag>();
             var canvas = GameObject.Find("VideoCanvas");
             if (canvas != null)
             {
                 go.transform.parent = canvas.transform;
-                Debug.Log("add video view");
-            }
-            else
-            {
-                Debug.Log("Canvas is null video view");
             }
 
-            // set up transform
             go.transform.Rotate(0f, 0.0f, 180.0f);
             go.transform.localPosition = Vector3.zero;
             go.transform.localScale = new Vector3(2f, 3f, 1f);
 
-            // configure videoSurface
             var videoSurface = go.AddComponent<VideoSurface>();
             return videoSurface;
         }
@@ -445,12 +481,9 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
         {
             int build = 0;
             Debug.Log("Agora: OnJoinChannelSuccess ");
-            _videoSample.Log.UpdateLog(string.Format("sdk version: ${0}",
-                _videoSample.RtcEngine.GetVersion(ref build)));
-            _videoSample.Log.UpdateLog(string.Format("sdk build: ${0}",
-              build));
-            _videoSample.Log.UpdateLog(
-                string.Format("OnJoinChannelSuccess channelName: {0}, uid: {1}, elapsed: {2}",
+            _videoSample.Log.UpdateLog(string.Format("sdk version: ${0}", _videoSample.RtcEngine.GetVersion(ref build)));
+            _videoSample.Log.UpdateLog(string.Format("sdk build: ${0}", build));
+            _videoSample.Log.UpdateLog(string.Format("OnJoinChannelSuccess channelName: {0}, uid: {1}, elapsed: {2}",
                                 connection.channelId, connection.localUid, elapsed));
         }
 
@@ -478,12 +511,10 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
 
         public override void OnUserOffline(RtcConnection connection, uint uid, USER_OFFLINE_REASON_TYPE reason)
         {
-            _videoSample.Log.UpdateLog(string.Format("OnUserOffLine uid: ${0}, reason: ${1}", uid,
-                (int)reason));
+            _videoSample.Log.UpdateLog(string.Format("OnUserOffLine uid: ${0}, reason: ${1}", uid, (int)reason));
             JoinChannelVideo.DestroyVideoView(uid);
         }
 
-        //Quality monitoring during calls
         public override void OnRtcStats(RtcConnection connection, RtcStats stats)
         {
             var panel = _videoSample.GetLocalVideoCallQualityPanel();
@@ -504,26 +535,6 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             }
         }
 
-        public override void OnLocalAudioStateChanged(RtcConnection connection, LOCAL_AUDIO_STREAM_STATE state, LOCAL_AUDIO_STREAM_REASON reason)
-        {
-
-        }
-
-        public override void OnRemoteAudioStats(RtcConnection connection, RemoteAudioStats stats)
-        {
-            var panel = _videoSample.GetRemoteVideoCallQualityPanel(stats.uid);
-            if (panel != null)
-            {
-                panel.AudioStats = stats;
-                panel.RefreshPanel();
-            }
-        }
-
-        public override void OnRemoteAudioStateChanged(RtcConnection connection, uint remoteUid, REMOTE_AUDIO_STATE state, REMOTE_AUDIO_STATE_REASON reason, int elapsed)
-        {
-
-        }
-
         public override void OnLocalVideoStats(RtcConnection connection, LocalVideoStats stats)
         {
             var panel = _videoSample.GetLocalVideoCallQualityPanel();
@@ -542,11 +553,6 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
                 panel.VideoStats = stats;
                 panel.RefreshPanel();
             }
-        }
-
-        public override void OnRemoteVideoStateChanged(RtcConnection connection, uint remoteUid, REMOTE_VIDEO_STATE state, REMOTE_VIDEO_STATE_REASON reason, int elapsed)
-        {
-
         }
     }
 
