@@ -430,8 +430,13 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             videoSurface.OnTextureSizeModify += (width, height) =>
             {
                 var transform = videoSurface.GetComponent<RectTransform>();
-              //  if (transform) transform.sizeDelta = new Vector2(width / 2, height / 2);
-                if (transform) transform.sizeDelta = new Vector2(640,360);
+                //  if (transform) transform.sizeDelta = new Vector2(width / 2, height / 2);
+            #if UNITY_ANDROID && !UNITY_EDITOR
+                            if (transform) transform.sizeDelta = new Vector2(640, 360);
+            #else
+                            if (transform) transform.sizeDelta = new Vector2(1450, 1080);
+            #endif
+
                 Debug.Log($"OnTextureSizeModify: {width}x{height}");
             };
             videoSurface.SetEnable(true);
@@ -447,9 +452,9 @@ namespace Agora_RTC_Plugin.API_Example.Examples.Basic.JoinChannelVideo
             if (canvas != null) go.transform.parent = canvas.transform;
             go.transform.Rotate(0f, 0f, 0f);
            
-            go.transform.localPosition = new Vector3(400,0,0);
+            go.transform.localPosition = new Vector3(200,0,0);
             go.transform.localScale = new Vector3(1, 1, 1f);
-            go.GetComponent<RectTransform>().sizeDelta = new Vector2(640, 360);
+           // go.GetComponent<RectTransform>().sizeDelta = new Vector2(640, 360);
             return go.AddComponent<VideoSurface>();
         }
 
