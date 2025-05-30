@@ -9,7 +9,6 @@ Build/
 *.csproj
 *.sln
 /.utmp
-*.zip
 RuntimeActionBindings.json
 RuntimeActionBindings.json.meta
 ProjectSettings\Packages\com.unity.testtools.codecoverage\Settings.json
